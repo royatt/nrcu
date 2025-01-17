@@ -9,8 +9,12 @@
 #include <pthread.h>
 #include <stdlib.h>
 
+#include "nrcu.h"
+
 
 char *g_nrcu_foo_data = NULL;
+
+nrcu_context_t g_nrcu_foo_context;
 
 
 void *reader_thread(void *arg)
@@ -22,10 +26,12 @@ void *reader_thread(void *arg)
     while (run) {
         ticks += 1;
         // read start
+        const volatile nrcu_promise_t promise = nrcu_read_lock(&g_nrcu_foo_context);
 
         current_data = atomic_load(&g_nrcu_foo_data);\
         // mimic work before we end, realistically you wouldn't ever sleep in a reader
-        sched_yield();
+        // sched_yield();
+        usleep(2000);
 
         switch (*current_data) {
             case '0':
@@ -39,6 +45,7 @@ void *reader_thread(void *arg)
         }
 
     read_end:
+        nrcu_read_unlock(&g_nrcu_foo_context, promise);
         // read end
         usleep(700);
     }
@@ -81,8 +88,8 @@ int main(int argc, char *argv[])
         data[0] = '1';
 
         // write start
-        char *old = g_nrcu_foo_data;
-        g_nrcu_foo_data = data;
+        char *old = atomic_exchange(&g_nrcu_foo_data, data);
+        nrcu_synchronize(&g_nrcu_foo_context);
         // write end
         old[0] = '2';
     } while (0 == usleep(2000));
